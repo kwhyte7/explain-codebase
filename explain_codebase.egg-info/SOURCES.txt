@@ -1,0 +1,10 @@
+README.md
+pyproject.toml
+explain_codebase/__main__.py
+explain_codebase/explain_codebase.py
+explain_codebase.egg-info/PKG-INFO
+explain_codebase.egg-info/SOURCES.txt
+explain_codebase.egg-info/dependency_links.txt
+explain_codebase.egg-info/entry_points.txt
+explain_codebase.egg-info/requires.txt
+explain_codebase.egg-info/top_level.txt

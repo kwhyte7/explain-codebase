@@ -42,4 +42,4 @@ dependencies = [
 ]
 
 [project.scripts]
-explain_codebase = "explain_codebase:main"
+explain_codebase = "explain_codebase.__main__:main"

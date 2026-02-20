@@ -1,0 +1,2 @@
+[console_scripts]
+explain_codebase = explain_codebase.__main__:main

@@ -18,9 +18,6 @@ directory = args.directory = os.getcwd()
 
 model = ChatOllama(model=model_name)
 
-def relative_path(target, relative_to):
-    return os.path.relpath(target, relative_to)
-
 # read gitignore, then ignore matching files
 def prune_gitignore_and_common(files_list: list) -> list:
     gitignore_path = os.path.join(directory, '.gitignore')
@@ -55,7 +52,8 @@ def scan_for_text_files(directory="./"):
     return filtered_files
 
 def evaluate_file(filepath):
-    prompt = "Explain this code. Write it in a markdown format. Give me a medium level description. Only return the markdown text"
+    prompt = "Explain this code, you are outputting directly to a markdown file, so write it in a markdown format. Give me a medium level description. Only return the markdown text. DO NOT preface this file with \"Here's your summary\" or similar."
+
     with open(filepath) as f:
         code_to_eval = f.read()
     result = model.invoke(code_to_eval + "\n" + prompt).content
@@ -77,6 +75,8 @@ def explain_directory(directory):
     text_files = prune_gitignore_and_common(text_files)
     
     for filepath in text_files:
+        # You should make it so that it outputs it as an .MD file, not as the same file type, AI!
+
         # Calculate relative path to maintain directory structure
         rel_path = os.path.relpath(filepath, directory)
         output_path = os.path.join(output_dir, rel_path)

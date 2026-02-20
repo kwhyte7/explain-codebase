@@ -8,6 +8,7 @@ from rich.console import Console
 from collections import defaultdict
 import shutil
 from rich.prompt import Confirm
+import yaml
 
 parser = ArgumentParser(
         description="Explain this codebase"
@@ -17,12 +18,33 @@ parser.add_argument("-m", "--model")
 parser.add_argument("-d", "--directory")
 
 args = parser.parse_args()
+console = Console()
 
-model_name = args.model or "qwen3:4b"
+# Default model
+model_name = "qwen3:4b"
+
+# Check config file in home directory
+config_path = os.path.expanduser('~/.explain_codebase.conf.yml')
+if os.path.exists(config_path):
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            if config and config.get('model'):
+                model_name = config['model']
+                console.print(f"[#00FF00]Using model {model_name} as specified from ~/.explain_codebase.conf.yml[/]")
+    except Exception as e:
+        print(e)
+        quit()
+
+# Override with CLI args if provided
+if args.model:
+    model_name = args.model
+    console.print(f"[bold #00FF00]Using model from passed arguments[/]")
+
 directory = args.directory or os.getcwd()
 
 model = ChatOllama(model=model_name)
-
+console.print("[#00FF00]Loaded LLM![/]")
 # read gitignore, then ignore matching files
 def prune_gitignore_and_common(files_list: list) -> list:
     gitignore_path = os.path.join(directory, '.gitignore')
@@ -144,7 +166,6 @@ def summarize_explanations(directory):
 
     # Helper to generate a summary for a list of files
     def create_directory_summary(file_list, output_path):
-        console = Console()
         # Read contents
         file_contents = []
         for file_path in file_list:
@@ -176,8 +197,7 @@ def summarize_explanations(directory):
             rel_dir = 'root'
         dir_groups[rel_dir].append(f)
 
-    # Generate summaries for each directory
-    console = Console()
+    # Generate summaries for each directory 
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),

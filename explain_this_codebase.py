@@ -13,19 +13,17 @@ parser.add_argument("-d", "--directory")
 
 args = parser.parse_args()
 
-model = args.model or "qwen3:4b"
+model_name = args.model or "qwen3:4b"
 directory = args.directory = os.getcwd()
+
+model = ChatOllama(model=model_name) # should have more args.. but whatever am i right
 
 def relative_path(target, relative_to): # this could be improved, AI!
     return os.path.relpath(target, relative_to)
 
 # read gitignore, then ignore matching files
 def prune_gitignore_and_common(files_list: list) -> list:
-    # list[str]
-    
-    # I want this function to: read .gitignore, prune those files (also prune hidden files/folders), AI!
-
-    gitignore_path = os.path.join(os.getcwd(), '.gitignore')
+    gitignore_path = os.path.join(directory, '.gitignore')
     if not os.path.exists(gitignore_path):
         gitignore_path = os.path.expanduser('~/.gitignore_global')
 
@@ -52,11 +50,33 @@ def prune_gitignore_and_common(files_list: list) -> list:
 # scan for files
 def scan_for_text_files(directory="./"):
     files_to_evaluate = glob(os.path.join(directory, "**", "*"), recursive=True)
-    # accept .py, .js, ETC AI!
     text_extensions = ('.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', '.txt')
     filtered_files = [f for f in files_to_evaluate if f.endswith(text_extensions)]
-    return prune_gitignore_and_common(filtered_files)
+    return filtered_files
 
+def evaluate_file(filepath): # shit 
+    
+    prompt = "Explain this code. Write it in a markdown format. Give me a medium level description. Only return the markdown text"
+    with open(filepath) as f: code_to_eval = f.read()
+    result = model.invoke(code_to_eval + "\n" + prompt).content
+
+    result = (result.startswith("```markdown") and result[11:-3]) or result
+
+    return result
+
+def explain_directory(directory):
+    text_files = scan_for_text_files(directory)
+    text_files = prune_gitignore_and_common(text_files)
+    
+    # ok now for each file, we should
+    for filepath in text_files:
+        if os.path.exists(os.path.join(directory, ".codebase_explained")):
+            # try to find the file in this (this should be a filestructure identical to the cwd), if it does, skip this file, AI!
+
+        # if not, save evaluate it and save the filepath in directory/.codebase_explained, same filestructure, AI!
+        ai_result = evaluate_file(filepath)
+
+        
 if __name__ == '__main__':
     files = scan_for_text_files(directory)
     print(f"Found {len(files)} files to evaluate.")

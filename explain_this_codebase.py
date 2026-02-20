@@ -136,7 +136,7 @@ def summarize_explanations(directory):
     md_files = []
     for root, dirs, files in os.walk(output_dir):
         for file in files:
-            if file.endswith('.md'):
+            if file.endswith('.md') and file != "SUMMARY.md":
                 md_files.append(os.path.join(root, file))
 
     if not md_files:

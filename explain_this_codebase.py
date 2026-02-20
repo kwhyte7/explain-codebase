@@ -16,9 +16,9 @@ args = parser.parse_args()
 model_name = args.model or "qwen3:4b"
 directory = args.directory = os.getcwd()
 
-model = ChatOllama(model=model_name) # should have more args.. but whatever am i right
+model = ChatOllama(model=model_name)
 
-def relative_path(target, relative_to): # this could be improved, AI!
+def relative_path(target, relative_to):
     return os.path.relpath(target, relative_to)
 
 # read gitignore, then ignore matching files
@@ -50,34 +50,49 @@ def prune_gitignore_and_common(files_list: list) -> list:
 # scan for files
 def scan_for_text_files(directory="./"):
     files_to_evaluate = glob(os.path.join(directory, "**", "*"), recursive=True)
-    text_extensions = ('.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', '.txt')
+    text_extensions = ('.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', '.md', '.txt')
     filtered_files = [f for f in files_to_evaluate if f.endswith(text_extensions)]
     return filtered_files
 
-def evaluate_file(filepath): # shit 
-    
+def evaluate_file(filepath):
     prompt = "Explain this code. Write it in a markdown format. Give me a medium level description. Only return the markdown text"
-    with open(filepath) as f: code_to_eval = f.read()
+    with open(filepath) as f:
+        code_to_eval = f.read()
     result = model.invoke(code_to_eval + "\n" + prompt).content
 
-    result = (result.startswith("```markdown") and result[11:-3]) or result
+    # Clean up markdown code block markers if present
+    if result.startswith("```markdown"):
+        result = result[11:-3]
+    elif result.startswith("```"):
+        result = result[3:-3]
 
     return result
 
 def explain_directory(directory):
+    output_dir = os.path.join(directory, ".codebase_explained")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     text_files = scan_for_text_files(directory)
     text_files = prune_gitignore_and_common(text_files)
     
-    # ok now for each file, we should
     for filepath in text_files:
-        if os.path.exists(os.path.join(directory, ".codebase_explained")):
-            # try to find the file in this (this should be a filestructure identical to the cwd), if it does, skip this file, AI!
+        # Calculate relative path to maintain directory structure
+        rel_path = os.path.relpath(filepath, directory)
+        output_path = os.path.join(output_dir, rel_path)
 
-        # if not, save evaluate it and save the filepath in directory/.codebase_explained, same filestructure, AI!
+        # Check if explanation already exists
+        if os.path.exists(output_path):
+            continue
+
+        # Evaluate and save
         ai_result = evaluate_file(filepath)
-
         
+        # Ensure parent directories exist for the output file
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            f.write(ai_result)
+
 if __name__ == '__main__':
-    files = scan_for_text_files(directory)
-    print(f"Found {len(files)} files to evaluate.")
-    print(files)
+    explain_directory(directory)

@@ -108,10 +108,11 @@ def explain_directory(directory):
 
     # Check existing directory
     if os.path.exists(output_dir):
-        if Confirm.ask(f"Overwrite existing '.codebase_explained' directory?"):
-            shutil.rmtree(output_dir)
+        if not Confirm.ask(f"Overwrite existing '.codebase_explained' directory?"):
+            # If user says no, proceed but skip overwriting existing files
+            pass
         else:
-            return
+            shutil.rmtree(output_dir)
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)

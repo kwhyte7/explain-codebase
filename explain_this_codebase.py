@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 import os
 from fnmatch import fnmatch
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+from rich.console import Console
 from collections import defaultdict
 
 parser = ArgumentParser(
@@ -16,7 +17,7 @@ parser.add_argument("-d", "--directory")
 args = parser.parse_args()
 
 model_name = args.model or "qwen3:4b"
-directory = args.directory = os.getcwd()
+directory = args.directory or os.getcwd()
 
 model = ChatOllama(model=model_name)
 
@@ -124,9 +125,11 @@ def summarize_explanations(directory):
 
     # Helper to generate a summary for a list of files
     def create_directory_summary(file_list, output_path):
+        console = Console()
         # Read contents
         file_contents = []
         for file_path in file_list:
+            console.log(f"Scanning file: {file_path}")
             with open(file_path, 'r') as f:
                 file_contents.append(f.read())
 
@@ -155,13 +158,25 @@ def summarize_explanations(directory):
         dir_groups[rel_dir].append(f)
 
     # Generate summaries for each directory
-    for dir_name, files in dir_groups.items():
-        if dir_name == 'root':
-            # Root level files
-            summary_path = os.path.join(output_dir, "OVERVIEW.md")
-        else:
-            summary_path = os.path.join(output_dir, dir_name, "SUMMARY.md")
-        create_directory_summary(files, summary_path)
+    console = Console()
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeRemainingColumn(),
+    ) as progress:
+        task_id = progress.add_task("Summarizing directories", total=len(dir_groups))
+        for dir_name, files in dir_groups.items():
+            console.print(f"[bold cyan]Processing directory:[/bold cyan] {dir_name}")
+
+            if dir_name == 'root':
+                # Root level files
+                summary_path = os.path.join(output_dir, "OVERVIEW.md")
+            else:
+                summary_path = os.path.join(output_dir, dir_name, "SUMMARY.md")
+            create_directory_summary(files, summary_path)
+
+            progress.update(task_id, advance=1)
 
     # Generate final collated file (FULL_SUMMARY)
     if len(dir_groups) > 1:

@@ -3,10 +3,10 @@ from langchain_ollama import ChatOllama
 from argparse import ArgumentParser
 import os
 from fnmatch import fnmatch
-from tqdm import tqdm
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 
 parser = ArgumentParser(
-        description="Explain this codebase"  
+        description="Explain this codebase"
         )
 
 parser.add_argument("-m", "--model")
@@ -75,27 +75,36 @@ def explain_directory(directory):
 
     text_files = scan_for_text_files(directory)
     text_files = prune_gitignore_and_common(text_files)
-    
-    for filepath in tqdm(text_files, desc="Explaining files"):
-        print(f"Scanning: {filepath}")
 
-        # Calculate relative path to maintain directory structure
-        rel_path = os.path.relpath(filepath, directory)
-        # Change extension to .md
-        output_path = os.path.join(output_dir, os.path.splitext(rel_path)[0] + '.md')
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeRemainingColumn(),
+    ) as progress:
+        task_id = progress.add_task("Explaining files", total=len(text_files))
+        for filepath in text_files:
+            print(f"Scanning: {filepath}")
 
-        # Check if explanation already exists
-        if os.path.exists(output_path):
-            continue
+            # Calculate relative path to maintain directory structure
+            rel_path = os.path.relpath(filepath, directory)
+            # Change extension to .md
+            output_path = os.path.join(output_dir, os.path.splitext(rel_path)[0] + '.md')
 
-        # Evaluate and save
-        ai_result = evaluate_file(filepath)
-        
-        # Ensure parent directories exist for the output file
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        with open(output_path, 'w') as f:
-            f.write(ai_result)
+            # Check if explanation already exists
+            if os.path.exists(output_path):
+                continue
+
+            # Evaluate and save
+            ai_result = evaluate_file(filepath)
+
+            # Ensure parent directories exist for the output file
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            with open(output_path, 'w') as f:
+                f.write(ai_result)
+
+            progress.update(task_id, advance=1)
 
 if __name__ == '__main__':
     explain_directory(directory)

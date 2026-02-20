@@ -6,6 +6,8 @@ from fnmatch import fnmatch
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 from rich.console import Console
 from collections import defaultdict
+import shutil
+from rich.prompt import Confirm
 
 parser = ArgumentParser(
         description="Explain this codebase"
@@ -72,6 +74,23 @@ def evaluate_file(filepath):
 
 def explain_directory(directory):
     output_dir = os.path.join(directory, ".codebase_explained")
+
+    # Check .gitignore
+    gitignore_path = os.path.join(directory, '.gitignore')
+    if os.path.exists(gitignore_path):
+        with open(gitignore_path, 'r') as f:
+            if '.codebase_explained' not in f.read():
+                if Confirm.ask("Add '.codebase_explained' to .gitignore?"):
+                    with open(gitignore_path, 'a') as f:
+                        f.write('\n.codebase_explained\n')
+
+    # Check existing directory
+    if os.path.exists(output_dir):
+        if Confirm.ask(f"Overwrite existing '.codebase_explained' directory?"):
+            shutil.rmtree(output_dir)
+        else:
+            return
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 

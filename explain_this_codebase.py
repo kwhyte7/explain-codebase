@@ -3,6 +3,7 @@ from langchain_ollama import ChatOllama
 from argparse import ArgumentParser
 import os
 from fnmatch import fnmatch
+from tqdm import tqdm
 
 parser = ArgumentParser(
         description="Explain this codebase"  
@@ -53,7 +54,7 @@ def scan_for_text_files(directory="./"):
     return filtered_files
 
 def evaluate_file(filepath):
-    prompt = "Explain this code, you are outputting directly to a markdown file, so write it in a markdown format. Give me a medium level description. Only return the markdown text. DO NOT preface this file with \"Here's your summary\" or similar."
+    prompt = "Generate a comprehensive, rich markdown explanation. You are outputting directly to a markdown file. You are the markdown file. Structure it with headers for Purpose, Key Features, Dependencies, and Usage. Keep it concise but detailed. Only return the markdown text. Do not include any introductory text."
 
     with open(filepath) as f:
         code_to_eval = f.read()
@@ -75,7 +76,9 @@ def explain_directory(directory):
     text_files = scan_for_text_files(directory)
     text_files = prune_gitignore_and_common(text_files)
     
-    for filepath in text_files:
+    for filepath in tqdm(text_files, desc="Explaining files"):
+        print(f"Scanning: {filepath}")
+
         # Calculate relative path to maintain directory structure
         rel_path = os.path.relpath(filepath, directory)
         # Change extension to .md

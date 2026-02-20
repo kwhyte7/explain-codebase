@@ -25,6 +25,7 @@ def prune_gitignore_and_common(files_list: list) -> list:
         gitignore_path = os.path.expanduser('~/.gitignore_global')
 
     ignored_patterns = []
+
     if os.path.exists(gitignore_path):
         with open(gitignore_path, 'r') as f:
             for line in f:
@@ -75,11 +76,10 @@ def explain_directory(directory):
     text_files = prune_gitignore_and_common(text_files)
     
     for filepath in text_files:
-        # You should make it so that it outputs it as an .MD file, not as the same file type, AI!
-
         # Calculate relative path to maintain directory structure
         rel_path = os.path.relpath(filepath, directory)
-        output_path = os.path.join(output_dir, rel_path)
+        # Change extension to .md
+        output_path = os.path.join(output_dir, os.path.splitext(rel_path)[0] + '.md')
 
         # Check if explanation already exists
         if os.path.exists(output_path):

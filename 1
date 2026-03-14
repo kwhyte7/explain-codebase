@@ -3,7 +3,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from rich.console import Console
 from rich.prompt import Confirm
-import os, yaml, git, enum, glob, shutil
+import os, yaml, git, enum
 
 console = Console() # rich console
 home_path = Path.home()
@@ -138,7 +138,7 @@ def is_text_file(file_path: Path) -> tuple[bool, MediaType]:
     return True, MediaType.TEXT
 
 
-def ask_add_codebase_explained_to_gitignore(directory):
+def ask_add_codebase_explained_to_gitignore():
     # Check .gitignore
     gitignore_path = os.path.join(directory, '.gitignore')
     if os.path.exists(gitignore_path):
@@ -173,7 +173,7 @@ def document_file(model, filepath, cwd, output_dir):
     filename = os.path.basename(filepath).replace(".", "_")
     relative_path = os.path.relpath(filepath, cwd)
 
-    with open(os.path.join(os.path.join(cwd, os.path.dirname(relative_path)), filename) + ".md", "w") as f:
+    with open(os.path.join(os.path.join(cwd, os.path.dirname(relative_path)), filename)) as f:
         f.write(result)
 
     return
@@ -182,20 +182,20 @@ def document_file(model, filepath, cwd, output_dir):
 def main():
     model = init_chat_model(
         model = config.get("model"),
-        **config.get("model_kwargs")
+        **model_kwargs
     )
 
     # find files to scan
-    cwd = args.directory or os.getcwd()
+    cwd = parser.directory or os.getcwd()
 
     # use glob to find files
     files_to_document = glob.glob(os.path.join(cwd, "**.*"), recursive=True)
     # filter by if its ignored by git, or is text file
-    files_to_document = [filepath for filepath in files_to_document if is_text_file(Path(filepath)) and not is_git_ignored_gitpython(filepath)]
+    files_to_document = [filepath for filepath in files_to_document if is_text_file(filepath) and not is_git_ignored_gitpython(filepath)]
 
     # for each file, read it, summarise it and save it to cwd + .codebase_explained
 
-    ask_add_codebase_explained_to_gitignore(cwd)
+    ask_add_codebase_explained_to_gitignore()
 
     output_dir = os.path.join(cwd, ".codebase_explained")
 

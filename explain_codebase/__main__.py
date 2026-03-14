@@ -1,102 +1,144 @@
-from glob import glob
-from langchain_ollama import ChatOllama
+from langchain.chat_models import init_chat_model
 from argparse import ArgumentParser
-import os
-from fnmatch import fnmatch
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+from pathlib import Path
 from rich.console import Console
-from collections import defaultdict
-import shutil
 from rich.prompt import Confirm
-import yaml
+import os, yaml, git, enum, glob, shutil
 
+console = Console() # rich console
+home_path = Path.home()
+
+# defaults
+config = {
+    "model" : "ollama:qwen:3.5:0.8b",
+    "model_kwargs" : {
+        "num_predict" : 5000
+    },
+    "directory" : None, # if none, use os.getcwd()
+    "prompt" : "Write documentation for the file content above, use code snippets if applicabble, write functions and explain how they work in MD format.",
+    "ignore_paths" : []
+}
+
+# does user have config?
+if os.path.exists(home_path / ".explain_codebase.conf.yml"):
+    # load config from yml
+    with open(home_path / ".explain_codebase.conf.yml") as f:
+        yaml_config = yaml.safe_load(f)
+        for k, v in yaml_config.items():
+            config[k] = v
+
+# overwrite with set arguments
 parser = ArgumentParser(
         description="Explain this codebase"
         )
 
 parser.add_argument("-m", "--model")
 parser.add_argument("-d", "--directory")
+parser.add_argument("-i", "--ignore")
 
 args = parser.parse_args()
-console = Console()
 
-# Default model
-model_name = "qwen3:4b"
+# map args onto config, AI!
 
-# Check config file in home directory
-config_path = os.path.expanduser('~/.explain_codebase.conf.yml')
-if os.path.exists(config_path):
+# functionality
+
+# for model maybe we should use init_chat_model
+
+# read all files other than those in the .gitignore
+# read only text files i guess
+
+# should provide a wiki like documentation
+# clear documentation of each function, maybe with usage cases (depends on prompt i guess)
+
+def is_git_ignored_gitpython(file_path):
+    """
+    Check if a file is ignored using GitPython
+    """
     try:
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-            if config and config.get('model'):
-                model_name = config['model']
-                console.print(f"[#00FF00]Using model {model_name} as specified from ~/.explain_codebase.conf.yml[/]")
+        # Find the git repository containing the file
+        repo = git.Repo(Path(file_path).parent, search_parent_directories=True)
+
+        # Check if file is ignored
+        return repo.ignored(file_path) != []
+    except (git.InvalidGitRepositoryError, git.NoSuchPathError):
+        # Not in a git repository
+        return False
+
+class MediaType(enum.Enum):
+    TEXT = "Text"
+    PDF = "PDF"
+    DOCX = "DOCX"
+    DOC = "DOC"
+    XLSX = "XLSX"
+    XLS = "XLS"
+    PPTX = "PPTX"
+    PPT = "PPT"
+    JPEG = "JPEG"
+    PNG = "PNG"
+    GIF = "GIF"
+    BMP = "BMP"
+    MP3 = "MP3"
+    WAV = "WAV"
+    MP4 = "MP4"
+    AVI = "AVI"
+    MKV = "MKV"
+    UNKNOWN = "Unknown"
+
+def detect_media_type(file_path: Path) -> MediaType:
+    try:
+        with file_path.open('rb') as file:
+            initial_chunk = file.read(1024)
+            if initial_chunk.startswith(b'%PDF'):
+                return MediaType.PDF
+            elif initial_chunk.startswith(b'PK\x03\x04'):
+                return MediaType.DOCX
+            elif initial_chunk.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+                return MediaType.DOC
+            elif initial_chunk.startswith(b'\xFF\xD8\xFF'):
+                return MediaType.JPEG
+            elif initial_chunk.startswith(b'\x89PNG\r\n\x1A\n'):
+                return MediaType.PNG
+            elif initial_chunk.startswith(b'GIF89a') or initial_chunk.startswith(b'GIF87a'):
+                return MediaType.GIF
+            elif initial_chunk.startswith(b'BM'):
+                return MediaType.BMP
+            elif initial_chunk.startswith(b'RIFF') and initial_chunk[8:12] == b'WAVE':
+                return MediaType.WAV
+            elif initial_chunk.startswith(b'ID3') or initial_chunk[0:2] == b'\xFF\xFB':
+                return MediaType.MP3
+            elif initial_chunk.startswith(b'\x00\x00\x00\x18ftypmp42') or initial_chunk.startswith(b'\x00\x00\x00 ftypisom'):
+                return MediaType.MP4
+            elif initial_chunk.startswith(b'RIFF') and initial_chunk[8:12] == b'AVI ':
+                return MediaType.AVI
+            elif initial_chunk.startswith(b'\x1A\x45\xDF\xA3'):
+                return MediaType.MKV
+            else:
+                return MediaType.UNKNOWN
     except Exception as e:
-        print(e)
-        quit()
+        print(f"An error occurred: {e}")
+        return MediaType.UNKNOWN
 
-# Override with CLI args if provided
-if args.model:
-    model_name = args.model
-    console.print(f"[bold #00FF00]Using model from passed arguments[/]")
+def is_text_file(file_path: Path) -> tuple[bool, MediaType]:
+    media_type = detect_media_type(file_path)
+    if media_type != MediaType.UNKNOWN:
+        return False, media_type
 
-directory = args.directory or os.getcwd()
+    try:
+        with open(file_path, 'rb') as file:
+            for chunk in iter(lambda: file.read(4096), b''):
+                chunk.decode('utf-8')
+                if any(c < 32 and c not in (9, 10, 13) for c in chunk):
+                    return False, MediaType.UNKNOWN
+    except UnicodeDecodeError:
+        return False, MediaType.UNKNOWN
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return False, MediaType.UNKNOWN
 
-model = ChatOllama(model=model_name)
-console.print("[#00FF00]Loaded LLM![/]")
-# read gitignore, then ignore matching files
-def prune_gitignore_and_common(files_list: list) -> list:
-    gitignore_path = os.path.join(directory, '.gitignore')
-    if not os.path.exists(gitignore_path):
-        gitignore_path = os.path.expanduser('~/.gitignore_global')
+    return True, MediaType.TEXT
 
-    ignored_patterns = []
 
-    if os.path.exists(gitignore_path):
-        with open(gitignore_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    ignored_patterns.append(line)
-
-    result = []
-    for file_path in files_list:
-        filename = os.path.basename(file_path)
-        # Prune hidden files/folders
-        if filename.startswith('.'):
-            continue
-        # Prune gitignore patterns
-        if any(fnmatch(filename, pattern) for pattern in ignored_patterns):
-            continue
-        result.append(file_path)
-    return result
-
-# scan for files
-def scan_for_text_files(directory="./"):
-    files_to_evaluate = glob(os.path.join(directory, "**", "*"), recursive=True)
-    text_extensions = ('.py', '.js', '.ts', '.jsx', '.tsx', '.html', '.css', '.md', '.txt')
-    filtered_files = [f for f in files_to_evaluate if f.endswith(text_extensions)]
-    return filtered_files
-
-def evaluate_file(filepath):
-    prompt = "Generate a comprehensive, rich markdown explanation. You are outputting directly to a markdown file. You are the markdown file. Structure it with headers for Purpose, Key Features, Dependencies, and Usage. Keep it concise but detailed. Only return the markdown text. Do not include any introductory text."
-
-    with open(filepath) as f:
-        code_to_eval = f.read()
-    result = model.invoke(code_to_eval + "\n" + prompt).content
-
-    # Clean up markdown code block markers if present
-    if result.startswith("```markdown"):
-        result = result[11:-3]
-    elif result.startswith("```"):
-        result = result[3:-3]
-
-    return result
-
-def explain_directory(directory):
-    output_dir = os.path.join(directory, ".codebase_explained")
-
+def ask_add_codebase_explained_to_gitignore(directory):
     # Check .gitignore
     gitignore_path = os.path.join(directory, '.gitignore')
     if os.path.exists(gitignore_path):
@@ -106,130 +148,73 @@ def explain_directory(directory):
                     with open(gitignore_path, 'a') as f:
                         f.write('\n.codebase_explained\n')
 
+def create_codebase_explained_folder(output_dir):
     # Check existing directory
     if os.path.exists(output_dir):
         if not Confirm.ask(f"Overwrite existing '.codebase_explained' directory?"):
             # If user says no, proceed but skip overwriting existing files
-            pass
+            return False
         else:
             shutil.rmtree(output_dir)
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    text_files = scan_for_text_files(directory)
-    text_files = prune_gitignore_and_common(text_files)
+    return True
 
-    with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-    ) as progress:
-        task_id = progress.add_task("Explaining files", total=len(text_files))
-        for filepath in text_files:
-            print(f"Scanning: {filepath}")
+def document_file(model, filepath, cwd, output_dir):
+    with open(filepath) as f:
+        content = f.read()
 
-            # Calculate relative path to maintain directory structure
-            rel_path = os.path.relpath(filepath, directory)
-            # Change extension to .md
-            output_path = os.path.join(output_dir, os.path.splitext(rel_path)[0] + '.md')
+    # ask the model
+    result = model.invoke(f"{content}\n\n{config.get('prompt')}").content
 
-            # Check if explanation already exists
-            if os.path.exists(output_path):
-                continue
+    # now need to get relpath, and save it.
+    filename = os.path.basename(filepath).replace(".", "_")
+    relative_path = os.path.relpath(filepath, cwd)
 
-            # Evaluate and save
-            ai_result = evaluate_file(filepath)
+    new_dirpath = os.path.join(os.path.join(cwd, ".codebase_explained"), os.path.dirname(relative_path))
+    os.makedirs(new_dirpath, exist_ok=True)
 
-            # Ensure parent directories exist for the output file
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(os.path.join(new_dirpath, filename) + ".md", "w") as f:
+        f.write(result)
 
-            with open(output_path, 'w') as f:
-                f.write(ai_result)
+    return
 
-            progress.update(task_id, advance=1)
 
-def summarize_explanations(directory):
-    output_dir = os.path.join(directory, ".codebase_explained")
-    if not os.path.exists(output_dir):
-        return
+def main():
+    console.print(f"Using model [lime]{config.get('model')}[/lime]")
+    model = init_chat_model(
+        model = config.get("model"),
+        **config.get("model_kwargs")
+    )
 
-    # Collect all markdown files
-    md_files = []
-    for root, dirs, files in os.walk(output_dir):
-        for file in files:
-            if file.endswith('.md') and file != "SUMMARY.md":
-                md_files.append(os.path.join(root, file))
+    # find files to scan
+    cwd = args.directory or os.getcwd()
 
-    if not md_files:
-        return
+    # use glob to find files
+    files_to_document = glob.glob(os.path.join(cwd, "**/*.*"), recursive=True)
+    # filter by if its ignored by git, or is text file
+    files_to_document = [filepath for filepath in files_to_document if is_text_file(Path(filepath)) and not is_git_ignored_gitpython(filepath)]
 
-    # Helper to generate a summary for a list of files
-    def create_directory_summary(file_list, output_path):
-        # Read contents
-        file_contents = []
-        for file_path in file_list:
-            console.log(f"Scanning file: {file_path}")
-            with open(file_path, 'r') as f:
-                file_contents.append(f.read())
+    # for each file, read it, summarise it and save it to cwd + .codebase_explained
 
-        combined_input = "\n\n---\n\n".join(file_contents)
-        prompt = "You are summarizing the following markdown files into a single comprehensive overview for a directory. Structure it with headers for each file. Keep it concise. Only return the markdown text."
+    ask_add_codebase_explained_to_gitignore(cwd)
 
-        result = model.invoke(combined_input + "\n" + prompt).content
+    output_dir = os.path.join(cwd, ".codebase_explained")
 
-        # Clean up markdown code block markers if present
-        if result.startswith("```markdown"):
-            result = result[11:-3]
-        elif result.startswith("```"):
-            result = result[3:-3]
+    overwriting = create_codebase_explained_folder(output_dir)
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, 'w') as f:
-            f.write(result)
+    for filepath in files_to_document:
 
-    # Group files by directory
-    dir_groups = defaultdict(list)
-    for f in md_files:
-        # Get relative directory path
-        rel_dir = os.path.dirname(os.path.relpath(f, output_dir))
-        if rel_dir == '.':
-            rel_dir = 'root'
-        dir_groups[rel_dir].append(f)
+        if os.path.exists(filepath) and not overwriting:
+            console.log(f"Skipping {filepath} as it already exists.")
+            continue
 
-    # Generate summaries for each directory 
-    with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        TimeRemainingColumn(),
-    ) as progress:
-        task_id = progress.add_task("Summarizing directories", total=len(dir_groups))
-        for dir_name, files in dir_groups.items():
-            console.print(f"[bold cyan]Processing directory:[/bold cyan] {dir_name}")
+        console.log(f"Writing {filepath}")
+        document_file(model, filepath, cwd, output_dir)
 
-            if dir_name == 'root':
-                # Root level files
-                summary_path = os.path.join(output_dir, "OVERVIEW.md")
-            else:
-                summary_path = os.path.join(output_dir, dir_name, "SUMMARY.md")
-            create_directory_summary(files, summary_path)
 
-            progress.update(task_id, advance=1)
 
-    # Generate final collated file (FULL_SUMMARY)
-    if len(dir_groups) > 1:
-        # Get all the summary files generated above (excluding the overview itself)
-        summary_files = []
-        for dir_name, files in dir_groups.items():
-            if dir_name == 'root':
-                continue
-            summary_files.append(os.path.join(output_dir, dir_name, "SUMMARY.md"))
-
-        if summary_files:
-            create_directory_summary(summary_files, os.path.join(output_dir, "FULL_SUMMARY.md"))
-
-if __name__ == '__main__':
-    explain_directory(directory)
-    summarize_explanations(directory)
+if __name__ == "__main__":
+    main()

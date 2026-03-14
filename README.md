@@ -1,4 +1,3 @@
-
 To build this into a CLI tool that you can invoke with `python -m explain_codebase`, you need to follow a specific directory structure and configure your `pyproject.toml` to create an entry point.
 
 Here is the step-by-step guide.
@@ -29,3 +28,5 @@ python -m explain_codebase
 1.  **`[project.scripts]`**: Defines the CLI command. We named it `explain_codebase`.
 2.  **`explain_codebase.__main__:main`**: Python looks for a file named `__main__.py` inside the package `explain_codebase` and runs the function called `main`.
 3.  **`python -m`**: Tells Python to execute the module `explain_codebase` using the entry point we defined above.
+=======
+

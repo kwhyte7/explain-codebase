@@ -173,13 +173,14 @@ def document_file(model, filepath, cwd, output_dir):
     filename = os.path.basename(filepath).replace(".", "_")
     relative_path = os.path.relpath(filepath, cwd)
 
-    with open(os.path.join(os.path.join(cwd, os.path.dirname(relative_path)), filename) + ".md", "w") as f:
+    with open(os.path.join(os.path.join(os.path.join(cwd, ".codebase_explained"), os.path.dirname(relative_path)), filename) + ".md", "w") as f:
         f.write(result)
 
     return
 
 
 def main():
+    console.print(f"Using model [lime]{config.get('model')}[/lime]")
     model = init_chat_model(
         model = config.get("model"),
         **config.get("model_kwargs")

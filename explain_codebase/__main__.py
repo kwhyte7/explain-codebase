@@ -2,7 +2,8 @@ from langchain.chat_models import init_chat_model
 from argparse import ArgumentParser
 from pathlib import Path
 from rich.console import Console
-import os, yaml
+from rich.prompt import Confirm
+import os, yaml, git, enum
 
 console = Console() # rich console
 home_path = Path.home()
@@ -10,8 +11,11 @@ home_path = Path.home()
 # defaults
 config = {
     "model" : "ollama:qwen:3.5:0.8b",
-    "model_kwargs" : {},
+    "model_kwargs" : {
+        "num_predict" : 5000
+    },
     "directory" : None, # if none, use os.getcwd()
+    "prompt" : "Write documentation for the code above, use code examples, write functions and explain how they work in MD format.",
     "ignore_paths" : []
 }
 
@@ -46,6 +50,135 @@ args = parser.parse_args()
 # should provide a wiki like documentation
 # clear documentation of each function, maybe with usage cases (depends on prompt i guess)
 
+def is_git_ignored_gitpython(file_path):
+    """
+    Check if a file is ignored using GitPython
+    """
+    try:
+        # Find the git repository containing the file
+        repo = git.Repo(Path(file_path).parent, search_parent_directories=True)
+
+        # Check if file is ignored
+        return repo.ignored(file_path) != []
+    except (git.InvalidGitRepositoryError, git.NoSuchPathError):
+        # Not in a git repository
+        return False
+
+class MediaType(enum.Enum):
+    TEXT = "Text"
+    PDF = "PDF"
+    DOCX = "DOCX"
+    DOC = "DOC"
+    XLSX = "XLSX"
+    XLS = "XLS"
+    PPTX = "PPTX"
+    PPT = "PPT"
+    JPEG = "JPEG"
+    PNG = "PNG"
+    GIF = "GIF"
+    BMP = "BMP"
+    MP3 = "MP3"
+    WAV = "WAV"
+    MP4 = "MP4"
+    AVI = "AVI"
+    MKV = "MKV"
+    UNKNOWN = "Unknown"
+
+def detect_media_type(file_path: Path) -> MediaType:
+    try:
+        with file_path.open('rb') as file:
+            initial_chunk = file.read(1024)
+            if initial_chunk.startswith(b'%PDF'):
+                return MediaType.PDF
+            elif initial_chunk.startswith(b'PK\x03\x04'):
+                return MediaType.DOCX
+            elif initial_chunk.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
+                return MediaType.DOC
+            elif initial_chunk.startswith(b'\xFF\xD8\xFF'):
+                return MediaType.JPEG
+            elif initial_chunk.startswith(b'\x89PNG\r\n\x1A\n'):
+                return MediaType.PNG
+            elif initial_chunk.startswith(b'GIF89a') or initial_chunk.startswith(b'GIF87a'):
+                return MediaType.GIF
+            elif initial_chunk.startswith(b'BM'):
+                return MediaType.BMP
+            elif initial_chunk.startswith(b'RIFF') and initial_chunk[8:12] == b'WAVE':
+                return MediaType.WAV
+            elif initial_chunk.startswith(b'ID3') or initial_chunk[0:2] == b'\xFF\xFB':
+                return MediaType.MP3
+            elif initial_chunk.startswith(b'\x00\x00\x00\x18ftypmp42') or initial_chunk.startswith(b'\x00\x00\x00 ftypisom'):
+                return MediaType.MP4
+            elif initial_chunk.startswith(b'RIFF') and initial_chunk[8:12] == b'AVI ':
+                return MediaType.AVI
+            elif initial_chunk.startswith(b'\x1A\x45\xDF\xA3'):
+                return MediaType.MKV
+            else:
+                return MediaType.UNKNOWN
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return MediaType.UNKNOWN
+
+def is_text_file(file_path: Path) -> tuple[bool, MediaType]:
+    media_type = detect_media_type(file_path)
+    if media_type != MediaType.UNKNOWN:
+        return False, media_type
+
+    try:
+        with open(file_path, 'rb') as file:
+            for chunk in iter(lambda: file.read(4096), b''):
+                chunk.decode('utf-8')
+                if any(c < 32 and c not in (9, 10, 13) for c in chunk):
+                    return False, MediaType.UNKNOWN
+    except UnicodeDecodeError:
+        return False, MediaType.UNKNOWN
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return False, MediaType.UNKNOWN
+
+    return True, MediaType.TEXT
+
+
+def ask_add_codebase_explained_to_gitignore():
+    # Check .gitignore
+    gitignore_path = os.path.join(directory, '.gitignore')
+    if os.path.exists(gitignore_path):
+        with open(gitignore_path, 'r') as f:
+            if '.codebase_explained' not in f.read():
+                if Confirm.ask("Add '.codebase_explained' to .gitignore?"):
+                    with open(gitignore_path, 'a') as f:
+                        f.write('\n.codebase_explained\n')
+
+def create_codebase_explained_folder(output_dir):
+    # Check existing directory
+    if os.path.exists(output_dir):
+        if not Confirm.ask(f"Overwrite existing '.codebase_explained' directory?"):
+            # If user says no, proceed but skip overwriting existing files
+            return False
+        else:
+            shutil.rmtree(output_dir)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    return True
+
+def document_file(model, filepath, cwd, output_dir):
+    with open(filepath) as f:
+        content = f.read()
+
+    # ask the model
+    result = model.invoke(f"{content}\n\n{config.get('prompt')}").content
+
+    # now need to get relpath, and save it.
+    filename = os.path.basename(filepath).replace(".", "_")
+    relative_path = os.path.relpath(filepath, cwd)
+
+    with open(os.path.join(os.path.join(cwd, os.path.dirname(relative_path)), filename)) as f:
+        f.write(result)
+
+    return
+
+
 def main():
     model = init_chat_model(
         model = config.get("model"),
@@ -55,11 +188,29 @@ def main():
     # find files to scan
     cwd = parser.directory or os.getcwd()
 
-    # use glob to find files, AI!
-    files_to_document = glob.glob(os.path.join(cwd, "**"))
-    # ignore images, and non text things. should include .py, .sh, .ts etc, AI!
+    # use glob to find files
+    files_to_document = glob.glob(os.path.join(cwd, "**.*"), recursive=True)
+    # filter by if its ignored by git, or is text file
+    files_to_document = [filepath for filepath in files_to_document if is_text_file(filepath) and not is_git_ignored_gitpython(filepath)]
 
-    # ignore (generously) if it's in the .gitignore. should also ignore everything in --ignore. return a list, AI!
+    # for each file, read it, summarise it and save it to cwd + .codebase_explained
+
+    ask_add_codebase_explained_to_gitignore()
+
+    output_dir = os.path.join(cwd, ".codebase_explained")
+
+    overwriting = create_codebase_explained_folder(output_dir)
+
+    for filepath in files_to_document:
+
+        if os.path.exists(filepath) and not overwriting:
+            console.log(f"Skipping {filepath} as it already exists.")
+            continue
+
+        console.log(f"Writing {filepath}")
+        document_file(model, filepath, cwd, output_dir)
+
+
 
 if __name__ == "__main__":
     main()

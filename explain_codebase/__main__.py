@@ -15,7 +15,7 @@ config = {
         "num_predict" : 5000
     },
     "directory" : None, # if none, use os.getcwd()
-    "prompt" : "Write documentation for the code above, use code examples, write functions and explain how they work in MD format.",
+    "prompt" : "Write documentation for the file content above, use code snippets if applicabble, write functions and explain how they work in MD format.",
     "ignore_paths" : []
 }
 
@@ -173,7 +173,10 @@ def document_file(model, filepath, cwd, output_dir):
     filename = os.path.basename(filepath).replace(".", "_")
     relative_path = os.path.relpath(filepath, cwd)
 
-    with open(os.path.join(os.path.join(os.path.join(cwd, ".codebase_explained"), os.path.dirname(relative_path)), filename) + ".md", "w") as f:
+    new_dirpath = os.path.join(os.path.join(cwd, ".codebase_explained"), os.path.dirname(relative_path))
+    os.makedirs(new_dirpath, exist_ok=True)
+
+    with open(os.path.join(new_dirpath, filename) + ".md", "w") as f:
         f.write(result)
 
     return
@@ -190,7 +193,7 @@ def main():
     cwd = args.directory or os.getcwd()
 
     # use glob to find files
-    files_to_document = glob.glob(os.path.join(cwd, "**.*"), recursive=True)
+    files_to_document = glob.glob(os.path.join(cwd, "**/*.*"), recursive=True)
     # filter by if its ignored by git, or is text file
     files_to_document = [filepath for filepath in files_to_document if is_text_file(Path(filepath)) and not is_git_ignored_gitpython(filepath)]
 

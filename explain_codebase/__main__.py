@@ -25,7 +25,7 @@ config = {
         "num_predict" : 5000
     },
     "directory" : None, # if none, use os.getcwd()
-    "prompt" : "Write documentation for the file content above, use code snippets if applicabble, write functions and explain how they work in MD format.",
+    "prompt" : "Write documentation for the file content above, use code snippets if applicable, write functions and explain how they work in MD format.",
     "ignore_paths" : [],
     "html" : True
 }

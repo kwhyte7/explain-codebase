@@ -493,7 +493,7 @@ def map_display_name_to_href_element(content):
 def main():
     console.print(f"[#00FF00]Using model[/#00FF00] {config.get('model')}")
     model = init_chat_model(
-        model = config.get("model"),
+        model = args.model or config.get("model"),
         **config.get("model_kwargs")
     )
 

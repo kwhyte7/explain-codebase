@@ -27,7 +27,7 @@ config = {
     "directory" : None, # if none, use os.getcwd()
     "prompt" : "Write documentation for the file content above, use code snippets if applicabble, write functions and explain how they work in MD format.",
     "ignore_paths" : [],
-    "html" : False
+    "html" : True
 }
 
 # sorry idk where to put this lmaooo
@@ -452,6 +452,22 @@ def create_codebase_explained_folder(output_dir):
 
     return True
 
+def paths_for_file(filepath, cwd, output_dir):
+    some_paths = [
+        os.path.basename(filepath).replace(".", "_"),
+        os.path.relpath(filepath, cwd)
+    ]
+
+    some_paths.append(
+        os.path.join(os.path.join(cwd, ".codebase_explained"), os.path.dirname(some_paths[1]))
+    )
+
+    some_paths.append(
+        os.path.join(some_paths[2], some_paths[0]) + (config.get("html") and ".html" or ".md")
+    )
+
+    return some_paths
+
 def document_file(model, filepath, cwd, output_dir):
     with open(filepath) as f:
         content = f.read()
@@ -460,13 +476,10 @@ def document_file(model, filepath, cwd, output_dir):
     result = model.invoke(f"{content}\n\n{config.get('prompt')}").content
 
     # now need to get relpath, and save it.
-    filename = os.path.basename(filepath).replace(".", "_")
-    relative_path = os.path.relpath(filepath, cwd)
-
-    new_dirpath = os.path.join(os.path.join(cwd, ".codebase_explained"), os.path.dirname(relative_path))
+    [filename, relative_path, new_dirpath, new_filepath] = paths_for_file(filepath, cwd, output_dir)
     os.makedirs(new_dirpath, exist_ok=True)
 
-    with open(os.path.join(new_dirpath, filename) + (config.get("html") and ".html" or ".md"), "w") as f:
+    with open(new_filepath, "w") as f:
         if config.get("html"):
             f.write("<html><head><style>" + css_for_html + "</style></head><body>" + markdown.markdown(result) + "</body></html>")
         else:
@@ -474,6 +487,8 @@ def document_file(model, filepath, cwd, output_dir):
 
     return
 
+def map_display_name_to_href_element(content):
+    return f"<li><a href='{content['relative_path']}'>{content['display_name']}</a></li>"
 
 def main():
     console.print(f"[#00FF00]Using model[/#00FF00] {config.get('model')}")
@@ -512,20 +527,30 @@ def main():
     ) as progress:
         task = progress.add_task("[green]documenting...", total=number_of_files_to_document)
 
+        contents = []
+
         for filepath in files_to_document:
 
+            [filename, relative_path, new_dirpath, new_filepath] = paths_for_file(filepath, cwd, output_dir)
+
+            contents.append({
+                "relative_path" : os.path.relpath(new_filepath, output_dir),
+                "display_name" : os.path.relpath(filepath, cwd)
+            })
+
             if os.path.exists(filepath) and not overwriting:
-                console.log(f"Skipping {filepath} as it already exists.\n")
+                console.log(f"Skipping {filepath} as it already exists.")
                 progress.update(task, advance=1)
                 continue
 
-            # i want to write an index page...
-
-            console.log(f"Documenting {filepath}\n")
+            console.log(f"Documenting {filepath}")
             document_file(model, filepath, cwd, output_dir)
             progress.update(task, advance=1)
 
-
+        console.log(f"Writing contents page....")
+        with open(os.path.join(output_dir, "index.html"), "w") as f:
+            contents_html = "<html><head><style>" + css_for_html + "</style></head><body><h1>.codebase_explained</h1><ul>" + "\n".join(list(map(map_display_name_to_href_element, contents))) + "</ul></body></html>"
+            f.write(contents_html)
 
 
 if __name__ == "__main__":

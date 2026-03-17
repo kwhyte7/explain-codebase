@@ -2,4 +2,5 @@
 
 **explain_codebase/__pycache__/*
 master.egg-info*
-.codebase_explained
+.output
+.idea/

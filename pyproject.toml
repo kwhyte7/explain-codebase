@@ -52,3 +52,9 @@ dependencies = [
 
 [project.scripts]
 explain_codebase = "explain_codebase.__main__:main"
+
+[dependency-groups]
+dev = [
+    "black>=26.3.1",
+    "ruff>=0.15.6",
+]

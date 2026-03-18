@@ -19,6 +19,7 @@ from explain_codebase.local_repository import (
     is_git_ignored_gitpython,
     ask_add_output_to_gitignore,
 )
+import asyncio
 
 console = Console()  # rich console
 home_path = Path.home()
@@ -90,14 +91,14 @@ def paths_for_file(filepath, cwd, output_dir):
     return some_paths
 
 
-def document_file(model, filepath, cwd, output_dir, content=None):
+async def document_file(model, filepath, cwd, output_dir, content=None):
     if content is None:
         with open(filepath) as f:
             content = f.read()
 
     # ask the model
 
-    result = model.invoke(f"{content}\n\n{config.get('prompt')}").content
+    result = (await model.ainvoke(f"{content}\n\n{config.get('prompt')}")).content
 
     # now need to get relpath, and save it.
     [filename, relative_path, new_dirpath, new_filepath] = paths_for_file(
@@ -124,7 +125,7 @@ def map_display_name_to_href_element(content):
     )
 
 
-def main():
+async def main():
     console.print(f"[#00FF00]Using model[/#00FF00] {config.get('model')}")
     model = init_chat_model(
         model=args.model or config.get("model"), **config.get("model_kwargs")
@@ -133,18 +134,18 @@ def main():
     # find files to scan
     cwd = args.directory or os.getcwd()
 
-    # use glob to find files
-    files_to_document = glob.glob(os.path.join(cwd, "**/*.*"), recursive=True)
-    # filter by if its ignored by git, or is text file
-    files_to_document = [
-        filepath
-        for filepath in files_to_document
-        if is_text_file(Path(filepath)) and not is_git_ignored_gitpython(filepath)
-    ]
+    if not args.repository:
+        # use glob to find files
+        files_to_document = glob.glob(os.path.join(cwd, "**/*.*"), recursive=True)
+        # filter by if its ignored by git, or is text file
+        files_to_document = [
+            filepath
+            for filepath in files_to_document
+            if is_text_file(Path(filepath)) and not is_git_ignored_gitpython(filepath)
+        ]
 
-    contents_to_document = None
-
-    if args.repository:
+        contents_to_document = None
+    else:
         files = get_remote_repo_files(args.repository)
         files_to_document = [file["path"] for file in files]
         contents_to_document = [file["text"] for file in files]
@@ -158,6 +159,44 @@ def main():
     overwriting = create_output_folder(output_dir)
 
     number_of_files_to_document = len(files_to_document)
+
+    semaphore = asyncio.Semaphore(4)
+
+    contents = []
+
+    # processes a file and documents it
+    async def process_file(i, filepath):
+        async with semaphore:
+            try:
+                filename, relative_path, new_dirpath, new_filepath = paths_for_file(
+                    filepath, cwd, output_dir
+                )
+
+                contents.append(
+                    {
+                        "relative_path": os.path.relpath(new_filepath, output_dir),
+                        "display_name": (
+                            filepath
+                            if args.repository
+                            else os.path.relpath(filepath, cwd)
+                        ),
+                    }
+                )
+
+                if os.path.exists(filepath) and not overwriting:
+                    console.log(f"Skipping {filepath} as it already exists.")
+                    return
+
+                console.log(f"Documenting {filepath}")
+
+                if contents_to_document:
+                    await document_file(
+                        model, filepath, cwd, output_dir, contents_to_document[i]
+                    )
+                else:
+                    await document_file(model, filepath, cwd, output_dir)
+            except Exception as e:
+                console.log(f"[red]Error:[/red] {filepath} -> {e}")
 
     with Progress(
         SpinnerColumn(),
@@ -173,37 +212,14 @@ def main():
             "[green]documenting...", total=number_of_files_to_document
         )
 
-        contents = []
-
-        for i, filepath in enumerate(files_to_document):
-
-            [filename, relative_path, new_dirpath, new_filepath] = paths_for_file(
-                filepath, cwd, output_dir
-            )
-
-            contents.append(
-                {
-                    "relative_path": os.path.relpath(new_filepath, output_dir),
-                    "display_name": (
-                        filepath if args.repository else os.path.relpath(filepath, cwd)
-                    ),
-                }
-            )
-
-            if os.path.exists(filepath) and not overwriting:
-                console.log(f"Skipping {filepath} as it already exists.")
-                progress.update(task, advance=1)
-                continue
-
-            console.log(f"Documenting {filepath}")
-
-            if contents_to_document:
-                document_file(model, filepath, cwd, output_dir, contents_to_document[i])
-            else:
-                document_file(model, filepath, cwd, output_dir)
-
+        # all documenting happens here
+        async def wrapped(i, f):
+            await process_file(i, f)
             progress.update(task, advance=1)
 
+        await asyncio.gather(*(wrapped(i, f) for i, f in enumerate(files_to_document)))
+
+        # making index.html
         console.log(f"Writing contents page....")
         with open(os.path.join(output_dir, "index.html"), "w") as f:
             contents_html = (
@@ -217,4 +233,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
